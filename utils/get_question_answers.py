@@ -27,10 +27,7 @@ def get_question_answers(
     rows: int = 25,
     cols: int = 5,
     skip_first_col: bool = True,
-    cell_fill_threshold: float = 0.22,
-    cell_fill_threshold_inner: float | None = None,
-    cell_fill_threshold_top_left: float | None = None,
-    cell_fill_threshold_top_right: float | None = None,
+    min_circle_fill_ratio: float = 0.30,
     question_fill_threshold: float = 0.03,
     margin: int = 3,
     draw_detection_circles: bool = True,
@@ -40,6 +37,8 @@ def get_question_answers(
     - Draw purple ROI border
     - Draw red grid lines (rows x cols)
     - Detect filled answers per row (default: skip col0, cols 1..4 => a|b|c|d)
+    - Bubble is filled only if ink covers >= min_circle_fill_ratio of the detection
+      circle (compared as rounded integer percent; default 30%). Ignores thin strokes/dots.
     - Mark filled cells with yellow circle
     """
     purple_bgr = (255, 0, 255)
@@ -119,47 +118,12 @@ def get_question_answers(
             tot = int(np.sum(mask == 255))
             ratio = ink / float(tot + 1e-6)
 
-            inner_shrink_px = 4
-            inner_radius = max(1, radius - inner_shrink_px)
-            inner_mask = np.zeros((ch, cw), dtype=np.uint8)
-            cv2.circle(inner_mask, (cx, cy), inner_radius, 255, -1)
-            inner_ink = int(np.sum(cell[inner_mask == 255] > 0))
-            inner_tot = int(np.sum(inner_mask == 255))
-            ratio_inner = inner_ink / float(inner_tot + 1e-6)
+            # Single gate: enough ink across the full bubble circle (not inner/TL shortcuts,
+            # which fired on strokes or specks). Compare rounded integer percents.
+            min_pct = round(float(min_circle_fill_ratio) * 100)
+            filled_circle = round(ratio * 100) >= min_pct
 
-            # Some marks touch the bubble on the top-left; prioritize that region too.
-            tl_dx = int(round(radius * 0.35))
-            tl_dy = int(round(radius * 0.35))
-            tl_r = max(1, int(round(radius * 0.55)))
-            tl_cx = int(np.clip(cx - tl_dx, 0, cw - 1))
-            tl_cy = int(np.clip(cy - tl_dy, 0, ch - 1))
-            tl_r = min(tl_r, tl_cx, tl_cy, (cw - 1 - tl_cx), (ch - 1 - tl_cy))
-            ratio_tl = 0.0
-            if tl_r > 1:
-                tl_mask = np.zeros((ch, cw), dtype=np.uint8)
-                cv2.circle(tl_mask, (tl_cx, tl_cy), tl_r, 255, -1)
-                tl_ink = int(np.sum(cell[tl_mask == 255] > 0))
-                tl_tot = int(np.sum(tl_mask == 255))
-                ratio_tl = tl_ink / float(tl_tot + 1e-6)
-
-            thr_inner = (
-                float(cell_fill_threshold_inner)
-                if cell_fill_threshold_inner is not None
-                else float(cell_fill_threshold) * 0.75
-            )
-            # Back-compat: if caller still passes top_right, treat it as top_left.
-            effective_top_left = (
-                cell_fill_threshold_top_left
-                if cell_fill_threshold_top_left is not None
-                else cell_fill_threshold_top_right
-            )
-            thr_tl = (
-                float(effective_top_left)
-                if effective_top_left is not None
-                else float(cell_fill_threshold) * 0.60
-            )
-
-            if (ratio >= float(cell_fill_threshold)) or (ratio_inner >= thr_inner) or (ratio_tl >= thr_tl):
+            if filled_circle:
                 label = chr(ord("a") + (c - start_c))
                 row_choices.append(label)
 
