@@ -5,7 +5,7 @@ from pathlib import Path
 from utils.get_coaching_code import get_coaching_code
 from utils.get_question_answers import get_question_answers
 from utils.get_set_code import get_set_code
-from utils.omr_warp import (
+from utils.omr_warp_100 import (
     OMR_CANVAS_SIZE_WH,
     OMR_TEMPLATE_CORNERS,
     warp_resized_scan_to_template,
@@ -17,7 +17,7 @@ def exact_omr_result(
     input_path: str,
     output_path: str,
     *,
-    target_size_wh: tuple[int, int] = (550, 820),
+    target_size_wh: tuple[int, int] = (930, 620),
     show: bool = True,
 ) -> dict:
     img = cv2.imread(input_path, cv2.IMREAD_COLOR)
@@ -48,8 +48,8 @@ def exact_omr_result(
     cv2.polylines(out, [form_square], isClosed=True, color=(0, 255, 0), thickness=4)
 
     # Coaching code block
-    x_min, y_min = 55, 75
-    x_max, y_max = 220, 375
+    x_min, y_min = 60, 60
+    x_max, y_max = 206, 324
     coaching = get_coaching_code(
         resized_bgr=resized,
         out_bgr=out,
@@ -66,18 +66,18 @@ def exact_omr_result(
     set_result = get_set_code(
         resized_bgr=resized,
         out_bgr=out,
-        x1=227,
-        y1=75,
-        x2=252,
-        y2=238,
+        x1=220,
+        y1=60,
+        x2=245,
+        y2=203,
         rows=6,
         skip_first_row=True,
     )
 
     # Questions block
-    q_x1, q_y1 = 245, 70
-    q_x2, q_y2 = 375, 768
-    q_rows, q_cols = 25, 5
+    q_x1, q_y1 = 250, 68
+    q_x2, q_y2 = 373, 560
+    q_rows, q_cols = 20, 5
     q_res_1 = get_question_answers(
         resized_bgr=resized,
         out_bgr=out,
@@ -92,8 +92,8 @@ def exact_omr_result(
     )
 
     q_width = q_x2 - q_x1
-    q2_x1 = q_x2 - 4
-    q2_x2 = q2_x1 + q_width - 3
+    q2_x1 = q_x2 + 6
+    q2_x2 = q2_x1 + q_width
     q_res_2 = get_question_answers(
         resized_bgr=resized,
         out_bgr=out,
@@ -107,7 +107,58 @@ def exact_omr_result(
         skip_first_col=True,
     )
 
-    filled_answers_by_q = {**q_res_1.answers_by_q, **q_res_2.answers_by_q}
+    q3_x1 = q2_x2 + 6
+    q3_x2 = q3_x1 + q_width
+    q_res_3 = get_question_answers(
+        resized_bgr=resized,
+        out_bgr=out,
+        x1=q3_x1,
+        y1=q_y1,
+        x2=q3_x2,
+        y2=q_y2,
+        q_start=51,
+        rows=q_rows,
+        cols=q_cols,
+        skip_first_col=True,
+    )
+
+    q4_x1 = q3_x2 + 6
+    q4_x2 = q4_x1 + q_width
+    q_res_4 = get_question_answers(
+        resized_bgr=resized,
+        out_bgr=out,
+        x1=q4_x1,
+        y1=q_y1,
+        x2=q4_x2,
+        y2=q_y2,
+        q_start=76,
+        rows=q_rows,
+        cols=q_cols,
+        skip_first_col=True,
+    )
+
+    q5_x1 = q4_x2 + 6
+    q5_x2 = q5_x1 + q_width
+    q_res_5 = get_question_answers(
+        resized_bgr=resized,
+        out_bgr=out,
+        x1=q5_x1,
+        y1=q_y1,
+        x2=q5_x2,
+        y2=q_y2,
+        q_start=101,
+        rows=q_rows,
+        cols=q_cols,
+        skip_first_col=True,
+    )
+
+    filled_answers_by_q = {
+        **q_res_1.answers_by_q,
+        **q_res_2.answers_by_q,
+        **q_res_3.answers_by_q,
+        **q_res_4.answers_by_q,
+        **q_res_5.answers_by_q,
+    }
 
     # cv2.imwrite(output_path, out)
 
@@ -132,6 +183,10 @@ def exact_omr_result(
         ax_coach.set_title("Coaching square (crop)")
         ax_coach.axis("off")
 
+        ax_set.imshow(cv2.cvtColor(set_result.set_crop_view, cv2.COLOR_BGR2RGB))
+        ax_set.set_title(f"SET box (zoom) | set_label={set_result.set_label}")
+        ax_set.axis("off")
+
         # axes[1, 0].imshow(coaching.first_row_bin, cmap="gray")
         # axes[1, 0].set_title("First row (binary)")
         # axes[1, 0].axis("off")
@@ -139,10 +194,6 @@ def exact_omr_result(
         # axes[1, 1].imshow(coaching.first_row_edges, cmap="gray")
         # axes[1, 1].set_title(f"First row (edges) | filled_numbers={coaching.filled_numbers}")
         # axes[1, 1].axis("off")
-
-        ax_set.imshow(cv2.cvtColor(set_result.set_crop_view, cv2.COLOR_BGR2RGB))
-        ax_set.set_title(f"SET box (zoom) | set_label={set_result.set_label}")
-        ax_set.axis("off")
 
         fig.tight_layout()
         plt.show()
@@ -217,7 +268,7 @@ def exact_omr_result(
 
 
 if __name__ == "__main__":
-    res1 = exact_omr_result("1.jpg", "res.png")
+    # res1 = exact_omr_result("21.bmp", "res.png")
     # res2 = exact_omr_result("2.jpg", "res2.png")
     # res3 = exact_omr_result("3.jpg", "res3.png")
     # res4 = exact_omr_result("4.jpg", "res4.png")
@@ -230,10 +281,10 @@ if __name__ == "__main__":
     # print(res5)
     # print(res6)
 
-    # omr_dir = Path("omr_images/50")
-    # bmp_paths = sorted(omr_dir.glob("*.bmp"))
-    # print(len(bmp_paths))
-    # for bmp_path in bmp_paths:
-    #     out_path = omr_dir / f"res{bmp_path.stem}.png"
-    #     exact_omr_result(str(bmp_path), str(out_path), show=True)
+    omr_dir = Path("omr_images/100")
+    bmp_paths = sorted(omr_dir.glob("*.bmp"))
+    print(len(bmp_paths))
+    for bmp_path in bmp_paths:
+        out_path = omr_dir / f"res{bmp_path.stem}.png"
+        exact_omr_result(str(bmp_path), str(out_path), show=True)
 
