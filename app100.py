@@ -162,11 +162,11 @@ def exact_omr_result(
         **q_res_5.answers_by_q,
     }
 
-    import os
-    outputs_100_dir = 'outputs_100'
-    os.makedirs(outputs_100_dir, exist_ok=True)
-    output_path_merged = os.path.join(outputs_100_dir, os.path.basename(output_path))
-    cv2.imwrite(output_path_merged, out)
+    # import os
+    # outputs_100_dir = 'outputs_100'
+    # os.makedirs(outputs_100_dir, exist_ok=True)
+    # output_path_merged = os.path.join(outputs_100_dir, os.path.basename(output_path))
+    # cv2.imwrite(output_path_merged, out)
 
     if show:
         from matplotlib import pyplot as plt

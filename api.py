@@ -18,7 +18,7 @@ from fastapi.responses import JSONResponse
 from app import exact_omr_result as extract_50_mark
 from app100 import exact_omr_result as extract_100_mark
 
-MAX_IMAGES = 50
+MAX_IMAGES = 150
 
 app = FastAPI(title="OMR Extract API", version="1.0.0")
 
