@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import time
 from pathlib import Path
 
 from utils.get_coaching_code import get_coaching_code
@@ -109,7 +111,11 @@ def exact_omr_result(
 
     filled_answers_by_q = {**q_res_1.answers_by_q, **q_res_2.answers_by_q}
 
-    # cv2.imwrite(output_path, out)
+    import os
+    outputs_50_dir = 'outputs_50'
+    os.makedirs(outputs_50_dir, exist_ok=True)
+    output_path_merged = os.path.join(outputs_50_dir, os.path.basename(output_path))
+    cv2.imwrite(output_path_merged, out)
 
     if show:
         from matplotlib import pyplot as plt
@@ -216,8 +222,18 @@ def exact_omr_result(
     }
 
 
+def _json_default(obj: object) -> object:
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 if __name__ == "__main__":
-    res1 = exact_omr_result("1.jpg", "res.png")
+    # res1 = exact_omr_result("1.jpg", "res.png", show=False)
     # res2 = exact_omr_result("2.jpg", "res2.png")
     # res3 = exact_omr_result("3.jpg", "res3.png")
     # res4 = exact_omr_result("4.jpg", "res4.png")
@@ -230,10 +246,27 @@ if __name__ == "__main__":
     # print(res5)
     # print(res6)
 
-    # omr_dir = Path("omr_images/50")
-    # bmp_paths = sorted(omr_dir.glob("*.bmp"))
-    # print(len(bmp_paths))
-    # for bmp_path in bmp_paths:
-    #     out_path = omr_dir / f"res{bmp_path.stem}.png"
-    #     exact_omr_result(str(bmp_path), str(out_path), show=True)
+    omr_dir = Path("omr_images/50")
+    bmp_paths = sorted(omr_dir.glob("*.bmp"))
+    n_paths = len(bmp_paths)
+    results: list[dict] = []
+    t_total_start = time.perf_counter()
+    for bmp_path in bmp_paths:
+        out_path = omr_dir / f"res{bmp_path.stem}.png"
+        t0 = time.perf_counter()
+        result = exact_omr_result(str(bmp_path), str(out_path), show=False)
+        elapsed_s = time.perf_counter() - t0
+        entry = {
+            "input_path": str(bmp_path),
+            "output_path": str(out_path),
+            "seconds": elapsed_s,
+            **result,
+        }
+        results.append(entry)
+        print(f"{bmp_path.name}: {elapsed_s:.4f}s")
+    total_s = time.perf_counter() - t_total_start
+    out_json = Path(__file__).resolve().parent / "50_q_result.json"
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2, default=_json_default)
+    print(f"paths: {n_paths} | total time: {total_s:.4f}s | wrote {out_json}")
 
