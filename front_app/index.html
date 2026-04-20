@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OMR Upload</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.7.9/dist/axios.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@2/dist/vue.js"></script>
+    <style>
+      /* Make horizontal scroll feel "trackable" on the results table */
+      #resultsWrap {
+        scrollbar-width: thin; /* Firefox */
+        scrollbar-color: rgba(148, 163, 184, 0.55) rgba(2, 6, 23, 0.6);
+      }
+      #resultsWrap::-webkit-scrollbar {
+        height: 10px;
+      }
+      #resultsWrap::-webkit-scrollbar-track {
+        background: rgba(2, 6, 23, 0.6);
+        border-top: 1px solid rgba(30, 41, 59, 0.9);
+      }
+      #resultsWrap::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.55);
+        border: 2px solid rgba(2, 6, 23, 0.6);
+        border-radius: 9999px;
+      }
+      #resultsWrap::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.8);
+      }
+      [v-cloak] {
+        display: none;
+      }
+
+      /* Modal + OMR sheet styling */
+      .fade-enter-active,
+      .fade-leave-active {
+        transition: opacity 0.18s ease;
+      }
+      .fade-enter,
+      .fade-leave-to {
+        opacity: 0;
+      }
+      .omr-bubble {
+        width: 18px;
+        height: 18px;
+        border-width: 2px;
+        border-style: solid;
+        border-color: rgba(148, 163, 184, 0.7); /* slate-400-ish */
+        border-radius: 9999px;
+        background: transparent;
+        display: inline-block;
+      }
+      .omr-bubble--student {
+        border-color: rgba(250, 204, 21, 0.95); /* yellow-400 */
+        background: rgba(250, 204, 21, 0.95);
+      }
+      .omr-bubble--correct {
+        border-color: rgba(34, 197, 94, 0.95); /* green-500 */
+        background: rgba(34, 197, 94, 0.95);
+      }
+      .omr-bubble--wrongBorder {
+        border-color: rgba(239, 68, 68, 0.95); /* red-500 */
+      }
+    </style>
+  </head>
+  <body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+    <div id="app" v-cloak class="mx-auto max-w-[992px] px-4 py-10">
+      <header class="mb-10 text-center">
+        <h1 class="text-2xl font-semibold tracking-tight text-white">OMR extraction</h1>
+        <p class="mt-2 text-sm text-slate-400">
+          Choose images and submit. Open DevTools → Console to see the JSON response.
+        </p>
+      </header>
+
+      <div class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div class="w-full">
+            <label class="block text-xs font-medium uppercase tracking-wide text-slate-500">Answer URL</label>
+            <input
+              type="url"
+              v-model.trim="answerUrl"
+              placeholder="http://127.0.0.1:5173/answers.json"
+              class="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            />
+            <p class="mt-1 text-xs text-slate-500">Loads correct answers for evaluation (green/red/yellow in modal).</p>
+          </div>
+          <button
+            type="button"
+            @click="loadAnswers"
+            :disabled="loadingAnswers"
+            class="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50 sm:w-auto"
+          >
+            {{ loadingAnswers ? 'Loading…' : 'Load Answers' }}
+          </button>
+        </div>
+      </div>
+
+      <div class="mb-6 rounded-lg border border-slate-800 bg-slate-900/50 p-4">
+        <label class="block text-xs font-medium uppercase tracking-wide text-slate-500"
+          >API base URL</label
+        >
+        <input
+          id="apiBase"
+          type="url"
+          v-model.trim="apiBase"
+          class="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+        />
+      </div>
+
+      <div class="rounded-xl border border-slate-800 bg-slate-900/40 p-2 shadow-lg">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
+          <div
+            class="inline-flex w-full items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/40 p-1 sm:w-auto"
+            role="tablist"
+            aria-label="Sheet type"
+          >
+            <button
+              id="tab50"
+              type="button"
+              role="tab"
+              :aria-selected="String(activeSheet === 50)"
+              aria-controls="panel50"
+              @click="setActiveSheet(50)"
+              :class="[
+                'flex-1 rounded-md px-3 py-2 text-sm font-medium transition sm:flex-none',
+                activeSheet === 50 ? 'bg-emerald-600 hover:bg-emerald-500 text-white' : 'bg-slate-900 hover:bg-slate-800 text-slate-200'
+              ]"
+            >
+              50 marks
+            </button>
+            <button
+              id="tab100"
+              type="button"
+              role="tab"
+              :aria-selected="String(activeSheet === 100)"
+              aria-controls="panel100"
+              @click="setActiveSheet(100)"
+              :class="[
+                'flex-1 rounded-md px-3 py-2 text-sm font-medium transition sm:flex-none',
+                activeSheet === 100 ? 'bg-sky-600 hover:bg-sky-500 text-white' : 'bg-slate-900 hover:bg-slate-800 text-slate-200'
+              ]"
+            >
+              100 marks
+            </button>
+          </div>
+          <p class="text-xs text-slate-500">
+            Tip: Select one or more images, then extract.
+          </p>
+        </div>
+
+        <div class="mt-3">
+          <!-- 50-mark -->
+          <section
+            id="panel50"
+            role="tabpanel"
+            aria-labelledby="tab50"
+            v-show="activeSheet === 50"
+            class="rounded-xl bg-slate-900 p-6"
+          >
+            <h2 class="text-lg font-medium text-emerald-400">50-mark sheet</h2>
+            <p class="mt-1 text-sm text-slate-400">
+              POST <code class="text-slate-300">/50-mark-extract</code>
+            </p>
+            <form id="form50" ref="form50" class="mt-5 space-y-4" @submit.prevent="submitExtract(50)">
+              <div>
+                <label class="block text-sm font-medium text-slate-300">Images</label>
+                <input
+                  id="files50"
+                  type="file"
+                  name="files"
+                  accept="image/*,.bmp"
+                  multiple
+                  required
+                  ref="files50"
+                  class="mt-1 block w-full text-sm text-slate-300 file:mr-4 file:rounded file:border-0 file:bg-emerald-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-emerald-500"
+                />
+              </div>
+              <button
+                type="submit"
+                :disabled="loading"
+                class="w-full rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:opacity-50"
+              >
+                Extract (50-mark)
+              </button>
+            </form>
+          </section>
+
+          <!-- 100-mark -->
+          <section id="panel100" role="tabpanel" aria-labelledby="tab100" v-show="activeSheet === 100" class="rounded-xl bg-slate-900 p-6">
+            <h2 class="text-lg font-medium text-sky-400">100-mark sheet</h2>
+            <p class="mt-1 text-sm text-slate-400">
+              POST <code class="text-slate-300">/100-mark-extract</code>
+            </p>
+            <form id="form100" ref="form100" class="mt-5 space-y-4" @submit.prevent="submitExtract(100)">
+              <div>
+                <label class="block text-sm font-medium text-slate-300">Images</label>
+                <input
+                  id="files100"
+                  type="file"
+                  name="files"
+                  accept="image/*,.bmp"
+                  multiple
+                  required
+                  ref="files100"
+                  class="mt-1 block w-full text-sm text-slate-300 file:mr-4 file:rounded file:border-0 file:bg-sky-600 file:px-4 file:py-2 file:text-sm file:font-medium file:text-white hover:file:bg-sky-500"
+                />
+              </div>
+              <button
+                type="submit"
+                :disabled="loading"
+                class="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500 disabled:opacity-50"
+              >
+                Extract (100-mark)
+              </button>
+            </form>
+          </section>
+        </div>
+      </div>
+
+      <p id="status" class="mt-8 text-center text-sm text-slate-500">{{ status }}</p>
+
+      <!-- Preloader -->
+      <div
+        id="loader"
+        v-show="loading"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-sm"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div class="rounded-xl border border-slate-800 bg-slate-900 px-5 py-4 shadow-xl">
+          <div class="flex items-center gap-3">
+            <div
+              class="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-emerald-400"
+              aria-hidden="true"
+            ></div>
+            <div>
+              <div class="text-sm font-medium text-slate-100">Processing…</div>
+              <div class="text-xs text-slate-400">Uploading images and extracting results</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Toast -->
+      <div id="toast" v-show="toastVisible" class="pointer-events-none fixed bottom-5 right-5 z-50">
+        <div
+          id="toastInner"
+          class="pointer-events-auto max-w-sm rounded-lg border border-slate-800 bg-slate-900 px-4 py-3 text-sm text-slate-100 shadow-xl"
+          role="status"
+          aria-live="polite"
+        >
+          {{ toastMessage }}
+        </div>
+      </div>
+
+      <!-- Results -->
+      <section class="mt-8 rounded-xl border border-slate-800 bg-slate-900/40 p-4 shadow-lg">
+        <div class="flex items-center justify-between gap-3">
+          <h3 class="text-sm font-medium text-slate-200">Results</h3>
+          <button
+            id="clearResults"
+            type="button"
+            @click="clearResults"
+            class="rounded-md border border-slate-800 bg-slate-950/40 px-3 py-1.5 text-xs text-slate-300 hover:bg-slate-900"
+          >
+            Clear
+          </button>
+        </div>
+
+        <div id="resultsEmpty" v-show="results.length === 0" class="mt-3 text-sm text-slate-500">
+          No results yet. Submit images from the active tab above.
+        </div>
+
+        <div id="resultsWrap" v-show="results.length > 0" class="mt-3 overflow-x-auto rounded-lg border border-slate-800">
+          <table class="min-w-max w-full border-collapse text-left text-sm">
+            <thead class="bg-slate-950/40 text-xs uppercase tracking-wide text-slate-400">
+              <tr>
+                <th class="whitespace-nowrap px-3 py-2 font-medium sticky left-0 z-20 bg-slate-950/90 text-slate-200">
+                  Coaching code
+                </th>
+                <th class="whitespace-nowrap px-3 py-2 font-medium">Set label</th>
+                <th v-for="q in sheetCount" :key="'h' + q" class="whitespace-nowrap px-3 py-2 font-medium">
+                  Q{{ q }}
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-slate-800 bg-slate-900">
+              <tr
+                v-for="(row, idx) in results"
+                :key="(row.original_filename || 'row') + ':' + idx"
+                class="cursor-pointer transition hover:bg-slate-800/40"
+                @click="openOmrModal(idx)"
+              >
+                <td class="whitespace-nowrap px-3 py-2 text-slate-200 sticky left-0 z-10 bg-slate-900">
+                  {{ row.coaching_code || '-' }}
+                </td>
+                <td class="whitespace-nowrap px-3 py-2 text-slate-200">
+                  {{ row.set_label || '-' }}
+                </td>
+                <td v-for="q in sheetCount" :key="idx + ':' + q" class="whitespace-nowrap px-3 py-2 text-slate-300">
+                  {{ answerText(row, q) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- OMR Modal -->
+      <transition name="fade">
+        <div
+          v-if="omrModalOpen"
+          class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/70 p-3 backdrop-blur-sm"
+          @click.self="closeOmrModal"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div class="w-full max-w-5xl rounded-xl border border-slate-800 bg-slate-950 shadow-2xl">
+            <div class="flex flex-col gap-3 border-b border-slate-800 bg-slate-950/60 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+              <div class="min-w-0">
+                <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                  <div class="text-xs uppercase tracking-wide text-slate-400">Coaching code</div>
+                  <div class="text-xs text-slate-500">
+                    ({{ currentRowIndex + 1 }} of {{ results.length }} results)
+                  </div>
+                </div>
+                <div class="truncate text-lg font-semibold text-white">
+                  {{ currentRow && currentRow.coaching_code ? currentRow.coaching_code : '-' }}
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  class="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="currentRowIndex <= 0"
+                  @click="prevRow"
+                >
+                  ← Prev
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md border border-slate-800 bg-slate-900 px-3 py-1.5 text-sm text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  :disabled="currentRowIndex >= results.length - 1"
+                  @click="nextRow"
+                >
+                  Next →
+                </button>
+                <button
+                  type="button"
+                  class="rounded-md border border-slate-800 bg-slate-950 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-900"
+                  @click="closeOmrModal"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+
+            <div ref="omrScroll" class="max-h-[75vh] overflow-y-auto px-4 py-4">
+              <div class="mb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div class="text-sm text-slate-300">
+                  Sheet: <span class="font-medium text-slate-100">{{ sheetCount }}</span> questions
+                </div>
+                <div class="text-xs text-slate-500">
+                  Click outside the modal or press Close to exit.
+                </div>
+              </div>
+
+              <div
+                :class="[
+                  'grid gap-4',
+                  sheetCount === 100 ? 'md:grid-cols-4' : 'md:grid-cols-2',
+                  'grid-cols-1'
+                ]"
+              >
+                <omr-column
+                  v-for="(col, cIdx) in omrColumns"
+                  :key="'col:' + cIdx"
+                  :questions="col"
+                  :row="currentRow"
+                  :right-answers="right_answers"
+                ></omr-column>
+              </div>
+            </div>
+          </div>
+        </div>
+      </transition>
+    </div>
+
+    <script>
+      Vue.component("omr-bubble", {
+        props: {
+          label: { type: String, required: true },
+          variant: { type: String, default: "default" }, // default | student | correct | studentWrong
+        },
+        template:
+          '<div class="flex items-center gap-2">' +
+          '  <span :class="[\'omr-bubble\', variantClass]"></span>' +
+          '  <span class="text-xs font-medium text-slate-400">{{ label }}</span>' +
+          "</div>",
+        computed: {
+          variantClass: function () {
+            if (this.variant === "student") return "omr-bubble--student";
+            if (this.variant === "correct") return "omr-bubble--correct";
+            if (this.variant === "studentWrong") return "omr-bubble--student omr-bubble--wrongBorder";
+            return "";
+          },
+        },
+      });
+
+      Vue.component("omr-question-row", {
+        props: {
+          q: { type: Number, required: true },
+          row: { type: Object, required: true },
+          rightAnswers: { type: Object, required: true },
+        },
+        methods: {
+          toSet: function (raw) {
+            const out = new Set();
+            if (!raw) return out;
+            if (Array.isArray(raw)) {
+              raw.forEach(function (v) {
+                const s = String(v || "").trim().toUpperCase();
+                if (s) out.add(s);
+              });
+              return out;
+            }
+            String(raw)
+              .split(/[,\s]+/)
+              .map(function (s) {
+                return s.trim().toUpperCase();
+              })
+              .filter(Boolean)
+              .forEach(function (s) {
+                out.add(s);
+              });
+            return out;
+          },
+        },
+        computed: {
+          studentSet: function () {
+            const answersByQ = this.row && this.row.answers_by_q ? this.row.answers_by_q : {};
+            return this.toSet(answersByQ[String(this.q)]);
+          },
+          correctSet: function () {
+            const ra = this.rightAnswers && typeof this.rightAnswers === "object" ? this.rightAnswers : {};
+            return this.toSet(ra[String(this.q)]);
+          },
+          correctOption: function () {
+            const arr = Array.from(this.correctSet);
+            return arr.length > 0 ? arr[0] : null;
+          },
+          isAnswered: function () {
+            return this.studentSet.size > 0;
+          },
+          isCorrect: function () {
+            if (this.studentSet.size === 0) return false;
+            if (this.correctSet.size === 0) return false;
+            if (this.studentSet.size !== this.correctSet.size) return false;
+            for (const v of this.studentSet) if (!this.correctSet.has(v)) return false;
+            return true;
+          },
+          optionsToRender: function () {
+            if (this.isCorrect && this.correctOption) return [this.correctOption];
+            return ["A", "B", "C", "D"];
+          },
+        },
+        template:
+          '<div class="grid grid-cols-[56px_1fr] items-center gap-3 border-b border-slate-800 py-2">' +
+          '  <div class="text-xs font-semibold text-slate-300">Q{{ q }}</div>' +
+          '  <div class="grid grid-cols-4 gap-3">' +
+          '    <omr-bubble' +
+          '      v-for="opt in optionsToRender"' +
+          '      :key="opt"' +
+          '      :label="opt"' +
+          '      :variant="(!isAnswered ? \'default\' : (isCorrect ? \'correct\' : (studentSet.has(opt) ? (correctSet.has(opt) ? \'correct\' : \'studentWrong\') : (correctSet.has(opt) ? \'correct\' : \'default\'))))"' +
+          '    ></omr-bubble>' +
+          "  </div>" +
+          "</div>",
+      });
+
+      Vue.component("omr-column", {
+        props: {
+          questions: { type: Array, required: true },
+          row: { type: Object, required: true },
+          rightAnswers: { type: Object, required: true },
+        },
+        template:
+          '<div class="rounded-lg border border-slate-800 bg-slate-900/30">' +
+          '  <div class="px-3 py-2 text-xs font-medium text-slate-400 bg-slate-950/30 border-b border-slate-800">' +
+          '    Questions {{ questions[0] }}–{{ questions[questions.length - 1] }}' +
+          "  </div>" +
+          '  <div class="px-3">' +
+          '    <omr-question-row v-for="q in questions" :key="q" :q="q" :row="row" :right-answers="rightAnswers"></omr-question-row>' +
+          "  </div>" +
+          "</div>",
+      });
+
+      new Vue({
+        el: "#app",
+        data: function () {
+          return {
+            apiBase: "http://127.0.0.1:8000",
+            answerUrl: "http://127.0.0.1:5173/answer.json",
+            loadingAnswers: false,
+            activeSheet: 50,
+            sheetCount: 50,
+            loading: false,
+            status: "",
+            toastVisible: false,
+            toastMessage: "",
+            toastTimer: null,
+            results: [],
+            omrModalOpen: false,
+            currentRowIndex: 0,
+            right_answers: {},
+          };
+        },
+        mounted: function () {
+          window.addEventListener("keydown", this.onKeydown);
+        },
+        beforeDestroy: function () {
+          window.removeEventListener("keydown", this.onKeydown);
+        },
+        computed: {
+          currentRow: function () {
+            if (!this.results || this.results.length === 0) return null;
+            return this.results[this.currentRowIndex] || null;
+          },
+          omrColumns: function () {
+            const cols = [];
+            const total = this.sheetCount === 100 ? 100 : 50;
+            const ranges =
+              total === 100
+                ? [
+                    [1, 25],
+                    [26, 50],
+                    [51, 75],
+                    [76, 100],
+                  ]
+                : [
+                    [1, 25],
+                    [26, 50],
+                  ];
+
+            ranges.forEach(function (r) {
+              const a = [];
+              for (let i = r[0]; i <= r[1]; i++) a.push(i);
+              cols.push(a);
+            });
+            return cols;
+          },
+        },
+        methods: {
+          onKeydown: function (e) {
+            if (!this.omrModalOpen) return;
+
+            const tag = e && e.target && e.target.tagName ? String(e.target.tagName).toUpperCase() : "";
+            const isTypingField = tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+            if (isTypingField) return;
+
+            if (e.key === "ArrowLeft") {
+              e.preventDefault();
+              this.prevRow();
+            } else if (e.key === "ArrowRight") {
+              e.preventDefault();
+              this.nextRow();
+            }
+          },
+          setActiveSheet: function (n) {
+            this.activeSheet = n;
+          },
+          baseUrl: function () {
+            return String(this.apiBase || "").replace(/\/$/, "");
+          },
+          showToast: function (message) {
+            if (this.toastTimer) window.clearTimeout(this.toastTimer);
+            this.toastMessage = message;
+            this.toastVisible = true;
+            const self = this;
+            this.toastTimer = window.setTimeout(function () {
+              self.toastVisible = false;
+            }, 2200);
+          },
+          clearResults: function () {
+            this.results = [];
+            this.status = "";
+          },
+          loadAnswers: async function () {
+            if (this.loadingAnswers) return;
+            const url = String(this.answerUrl || "").trim();
+            if (!url) {
+              this.status = "Provide an Answer URL first.";
+              return;
+            }
+
+            this.loadingAnswers = true;
+            this.status = "Loading answers…";
+            try {
+              const res = await axios.get(url);
+              if (!res || typeof res.data !== "object") {
+                this.right_answers = {};
+                this.status = "Answer file format invalid.";
+                return;
+              }
+              this.right_answers = res.data;
+              this.status = "Answers loaded.";
+              this.showToast("Answers loaded.");
+            } catch (err) {
+              console.error("[answers] load failed", err);
+              this.status = "Failed to load answers — check URL / network.";
+            } finally {
+              this.loadingAnswers = false;
+            }
+          },
+          answerText: function (row, q) {
+            const key = String(q);
+            const v = row && row.answers_by_q ? row.answers_by_q[key] : null;
+            if (!v) return "";
+            if (Array.isArray(v)) return v.join(",");
+            return String(v);
+          },
+          normalizeApiResponse: function (data) {
+            if (!data || typeof data !== "object") return [];
+            const results = Array.isArray(data.results) ? data.results : [];
+            return results
+              .map(function (item) {
+                const r = item && item.result ? item.result : {};
+                const answersByQ = r.answers_by_q && typeof r.answers_by_q === "object" ? r.answers_by_q : {};
+                const coachingCodes = Array.isArray(r.coaching_codes) ? r.coaching_codes : [];
+                const coachingCode =
+                  coachingCodes.length > 0
+                    ? String(coachingCodes[0])
+                    : r.coaching_code
+                      ? String(r.coaching_code)
+                      : "";
+                return {
+                  original_filename: item && item.original_filename ? String(item.original_filename) : "",
+                  coaching_code: coachingCode,
+                  set_label: r.set_label != null ? String(r.set_label) : "",
+                  answers_by_q: answersByQ,
+                };
+              })
+              .filter(function (row) {
+                return row.coaching_code || row.set_label || (row.original_filename && row.original_filename.length);
+              });
+          },
+          submitExtract: async function (sheetCount) {
+            if (this.loading) return;
+            const endpoint = sheetCount === 50 ? "/50-mark-extract" : "/100-mark-extract";
+            const label = sheetCount === 50 ? "50-mark" : "100-mark";
+
+            const fileInput = sheetCount === 50 ? this.$refs.files50 : this.$refs.files100;
+            const formEl = sheetCount === 50 ? this.$refs.form50 : this.$refs.form100;
+            const files = fileInput && fileInput.files ? fileInput.files : null;
+
+            if (!files || files.length === 0) {
+              this.status = "Select at least one image.";
+              return;
+            }
+
+            const formData = new FormData();
+            for (let i = 0; i < files.length; i++) {
+              formData.append("files", files[i]);
+            }
+
+            this.loading = true;
+            this.status = label + ": processing…";
+            try {
+              const url = this.baseUrl() + endpoint;
+              const res = await axios.post(url, formData);
+              console.log("[" + label + "] response status:", res.status);
+              console.log("[" + label + "] response data:", res.data);
+
+              this.sheetCount = sheetCount;
+              this.results = this.normalizeApiResponse(res.data);
+
+              if (formEl && typeof formEl.reset === "function") formEl.reset();
+              this.status = label + ": done.";
+              this.showToast("Extraction completed (" + sheetCount + "-mark).");
+            } catch (err) {
+              if (axios.isAxiosError(err) && err.response) {
+                console.error("[" + label + "] error status:", err.response.status);
+                console.error("[" + label + "] error data:", err.response.data);
+                this.status = label + ": error " + err.response.status + " — details in console.";
+              } else {
+                console.error("[" + label + "]", err);
+                this.status = label + ": request failed — see console.";
+              }
+            } finally {
+              this.loading = false;
+            }
+          },
+          openOmrModal: function (idx) {
+            this.currentRowIndex = idx;
+            this.omrModalOpen = true;
+            this.resetOmrScroll();
+          },
+          closeOmrModal: function () {
+            this.omrModalOpen = false;
+          },
+          resetOmrScroll: function () {
+            const self = this;
+            this.$nextTick(function () {
+              const el = self.$refs.omrScroll;
+              if (el && typeof el.scrollTop === "number") el.scrollTop = 0;
+            });
+          },
+          nextRow: function () {
+            if (this.currentRowIndex >= this.results.length - 1) return;
+            this.currentRowIndex += 1;
+            this.resetOmrScroll();
+          },
+          prevRow: function () {
+            if (this.currentRowIndex <= 0) return;
+            this.currentRowIndex -= 1;
+            this.resetOmrScroll();
+          },
+        },
+      });
+    </script>
+  </body>
+</html>
